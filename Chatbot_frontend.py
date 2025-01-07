@@ -1,50 +1,24 @@
-# <========================================================= Importing Required Libraries & Functions =================================================>
 import streamlit as st
 from streamlit_chat import message
-from streamlit_extras.colored_header import colored_header
 from streamlit_extras.add_vertical_space import add_vertical_space
 import nltk
-nltk.download('stopwords')
-
-
-nltk.download("punkt")
-nltk.download('wordnet')
-from nltk.stem import WordNetLemmatizer
-lemmatizer = WordNetLemmatizer()
 import json
 import pickle
-
 import numpy as np
 from keras.models import load_model
-
+from nltk.stem import WordNetLemmatizer
 from PIL import Image
-# <-------------------------------------------------------------Functions ----------------------------------------------------------------------------------->
-# from chatbot_final_code import clean_up_sentence
-# from chatbot_final_code import bow
-# from chatbot_final_code import predict_class
-# from chatbot_final_code import chatbot_response
+import random
 
-# <---------------------------------------------------------- Page Configaration ----------------------------------------------------------------------------->
-im = Image.open('bot.jpg')
-st.set_page_config(layout="wide",page_title="Student's Career Counselling Chatbot",page_icon = im)
+# Initialize NLTK
+nltk.download('stopwords')
+nltk.download("punkt")
+nltk.download('wordnet')
+lemmatizer = WordNetLemmatizer()
 
-
-
-
-# <---------------------------------------------------------- Main Header ------------------------------------------------------------------------------------->
-st.markdown(
-    """
-    <div style="background-color: #FF8C00 ; padding: 10px">
-        <h1 style="color: brown; font-size: 48px; font-weight: bold">
-           <center> <span style="color: black; font-size: 64px">C</span>areer <span style="color: black; font-size: 64px">B</span>uddy <span style="color: black; font-size: 64px">
-        </h1>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# <========================================================= Importing Data Files  ====================================================================>
-
+# <========================================================= Load Resources ===============================================================>
+# Load chatbot model and necessary files
+model = load_model('chatbot_model.h5')
 with open('intents3.json', 'r') as file:
     intents = json.load(file)
 with open('words.pkl', 'rb') as file:
@@ -52,55 +26,44 @@ with open('words.pkl', 'rb') as file:
 with open('classes.pkl', 'rb') as file:
     classes = pickle.load(file)
 
+# <---------------------------------------------------------- Page Configuration ----------------------------------------------------------->
+im = Image.open('bot.jpg')
+st.set_page_config(layout="wide", page_title="Student's Career Counselling Chatbot", page_icon=im)
 
+# <--------------------------------------------------- Hide the Right Side Streamlit Menu Button ------------------------------------------------>
+st.markdown(""" <style>#MainMenu {visibility: hidden;}footer {visibility: hidden;}</style> """, unsafe_allow_html=True)
 
-# <--------------------------hide the right side streamlit menue button --------------------------------->
-# Referance ~ "https://towardsdatascience.com/5-ways-to-customise-your-streamlit-ui-e914e458a17c"
-st.markdown(""" <style>
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-</style> """, unsafe_allow_html=True)
-
-
-# <=========================================================== Sidebar ================================================================================> 
+# <=================================================== Sidebar ==========================================================================>
 with st.sidebar:
-    st.title('''🤗💬 Student's career counselling bot''')
-    
+    st.title('''🤗💬 Student's Career Counselling Bot''')
     st.markdown('''
     ## About~
-    This app has been developed by 5 students of VIT-AP :\n
-    Harshita Bajaj [22MSD7013]\n
-    Arya Chakraborty [22MSD7020] \n
-    Rituparno Das [22MSD2027]\n
-    Shritama Sengupta [22MSD7032]\n
-    Arundhuti Chakraborty [22MSD7046]
-
+    This app has been developed by 5 students of VIT-AP :
+    - Harshita Bajaj [22MSD7013]
+    - Arya Chakraborty [22MSD7020]
+    - Rituparno Das [22MSD2027]
+    - Shritama Sengupta [22MSD7032]
+    - Arundhuti Chakraborty [22MSD7046]
     ''')
     add_vertical_space(5)
-    
-# <============================================================= Initializing Session State ==========================================================>
+
+# <=================================================== Initializing Session State =========================================================>
 if 'generated' not in st.session_state:
     st.session_state['generated'] = ["I'm an AI Career Counselor, How may I help you?"]
 
 if 'past' not in st.session_state:
     st.session_state['past'] = ['Hi!']
 
-
-
+# <==================================================== Input Box Styling =============================================================>
 input_container = st.container()
-
-colored_header(label='', description='', color_name='blue-30')
 response_container = st.container()
 
-
-#<================================================== Function for taking user provided prompt as input ================================================>
-# def pressed_enter_key(text):
-#     if text == 
-
+# <================================================= Function to Get Text Input ==========================================================>
 def get_text():
     input_text = st.text_input("You: ",  key="input", on_change=None)
     return input_text
 
+# <==================================================== Style Customization for Text Input ===============================================>
 styl = f"""
 <style>
     .stTextInput {{
@@ -112,26 +75,56 @@ styl = f"""
 """
 st.markdown(styl, unsafe_allow_html=True)
 
-#<------------------------------------------------ Applying the user input box ------------------------------------------------------------------------>
+# <===================================================== Displaying Input and Response ===================================================>
 with input_container:
     user_input = get_text()
 
-# <================================================ Loading The Model ===============================================================>
-model=load_model('chatbot_model.h5')
+# <===================================================== Bot Response Generation ==============================================>
+def clean_up_sentence(sentence):
+    """Tokenize and lemmatize the input sentence."""
+    sentence_words = nltk.word_tokenize(sentence)
+    sentence_words = [lemmatizer.lemmatize(word.lower()) for word in sentence_words]
+    return sentence_words
 
+def bow(sentence, words):
+    """Return a bag of words: 0 or 1 for each word in the vocabulary that exists in the sentence."""
+    sentence_words = clean_up_sentence(sentence)
+    bag = [0] * len(words)
+    for s in sentence_words:
+        for i, word in enumerate(words):
+            if word == s:
+                bag[i] = 1
+    return np.array(bag)
 
-# <============================== Function for taking user prompt as input followed by producing AI generated responses ============>
+def predict_class(sentence, model):
+    """Predict the class of the input sentence using the trained model."""
+    p = bow(sentence, words)
+    res = model.predict(np.array([p]))[0]
+    print(f"Prediction output: {res}")  # Debugging output
+    ERROR_THRESHOLD = 0.25  # You can adjust this threshold
+    results = [[i, r] for i, r in enumerate(res) if r > ERROR_THRESHOLD]
+    results.sort(key=lambda x: x[1], reverse=True)
+    return_list = [{"intent": classes[r[0]], "probability": str(r[1])} for r in results]
+    return return_list
 
+def get_response(ints, intents_json):
+    """Return a random response for the predicted intent."""
+    tag = ints[0]['intent']
+    print(f"Predicted intent: {tag}")  # Log the predicted tag
+    for intent in intents_json['intents']:
+        if intent['tag'] == tag:
+            response = random.choice(intent['responses'])
+            print(f"Response chosen: {response}")  # Log the response
+            return response
+    return "Sorry, I didn't understand that."
 
-# TODO: Implement a data model that will make a response
+def generate_response(user_input):
+    """Generate a response from the chatbot."""
+    ints = predict_class(user_input, model)  # Get prediction
+    response = get_response(ints, intents)  # Get response based on predicted class
+    return response
 
-# def generate_response(prompt):
-#     clean_up_sentence(prompt) # For Lemmatizing and tokenizing the new sentence
-#     bow(prompt, words, show_details=True) #
-#     predict_class(prompt,model)
-#     response = chatbot_response(prompt)
-#     return response
-#<--------------------Creating the submit button and changing it using CSS----------------------->    
+# <==================================================== Submit Button Styling =================================================>
 submit_button = st.button("Enter")
 styl = f"""
     <style>
@@ -144,33 +137,25 @@ styl = f"""
         font-size: 24px;
         z-index: 9999;
         border-radius: 20px;
-        height:200px
-        width:100px
+        height:200px;
+        width:100px;
         }}
-        
     </style>
-    """
+"""
 st.markdown(styl, unsafe_allow_html=True)
 
-#<====================== Conditional display of AI generated responses as a function of user provided prompts=====================================>
+# <=================================================== Conditional Display of AI Response ==============================================>
 with response_container:
     if user_input: 
         if submit_button:
             if user_input == "Who is your maker":
-                response = "GOD !!"
+                response = "GOD!!"
                 st.session_state.past.append(user_input)
-
-
-                # TODO: RENDER a response HERE
                 st.session_state.generated.append(response)
-                #st.text_input("Enter your input", value="", key="user_input")
-
             else:
-                
-                response = None # generate_response(user_input)
+                response = generate_response(user_input)  # Call the function to generate response
                 st.session_state.past.append(user_input)
                 st.session_state.generated.append(response)
-                #st.text_input("Enter your input", value="", key="user_input")
         
     if st.session_state['generated']:
         for i in range(len(st.session_state['generated'])):
